@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__serena__list_dir",
+      "mcp__serena__activate_project",
+      "mcp__serena__check_onboarding_performed",
+      "mcp__serena__onboarding",
+      "mcp__serena__read_file",
+      "mcp__serena__find_file",
+      "mcp__serena__write_memory",
+      "mcp__serena__create_text_file",
+      "mcp__serena__replace_regex",
+      "Bash(cat:*)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "microsoft.docs.mcp",
+    "context7",
+    "serena",
+    "shadcn"
+  ]
+}

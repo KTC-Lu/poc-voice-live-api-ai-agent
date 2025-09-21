@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "microsoft.docs.mcp": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "mcp-remote", "https://learn.microsoft.com/api/mcp"]
+    },
+    "context7": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "mcp-remote", "https://mcp.context7.com/sse"]
+    },
+    "serena": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena",
+        "serena-mcp-server",
+        "--enable-web-dashboard",
+        "False"
+      ]
+    },
+    "shadcn": {
+      "command": "cmd",
+      "args": ["/c", "npx", "shadcn@latest", "mcp"]
+    }
+  }
+}
