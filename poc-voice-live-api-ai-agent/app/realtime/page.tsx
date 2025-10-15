@@ -11,6 +11,8 @@ export default function RealtimePage() {
   const dcRef = useRef<any>(null)
   const chatContainerRef = useRef<HTMLDivElement | null>(null)
   const recognitionRef = useRef<any>(null)
+  const greetingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const userHasSpokenRef = useRef(false)
 
   // Utility: small sleep
   function sleep(ms: number) {
@@ -39,6 +41,64 @@ export default function RealtimePage() {
       console.error('safeSend failed to stringify/send object', { err, objSnippet: String(obj?.type || typeof obj) })
       throw err
     }
+  }
+
+  // 接続後にユーザーが話さない場合、AIから挨拶を送信する
+  async function sendProactiveGreeting() {
+    const dc = dcRef.current
+    if (!dc || userHasSpokenRef.current) {
+      return
+    }
+
+    try {
+      // AIに挨拶を促すためのメッセージを送信
+      await safeSend(dc, {
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: 'こんにちは'
+            }
+          ]
+        }
+      })
+
+      // AIからの応答を生成するようリクエスト
+      await safeSend(dc, {
+        type: 'response.create'
+      })
+
+      console.debug('Proactive greeting sent')
+    } catch (e) {
+      console.warn('Failed to send proactive greeting:', e)
+    }
+  }
+
+  // 接続成功後に挨拶タイマーを開始
+  function startGreetingTimer() {
+    // 既存のタイマーがあればクリア
+    if (greetingTimeoutRef.current) {
+      clearTimeout(greetingTimeoutRef.current)
+    }
+
+    userHasSpokenRef.current = false
+
+    // 5秒後にAIから挨拶を送信
+    greetingTimeoutRef.current = setTimeout(() => {
+      sendProactiveGreeting()
+    }, 5000)
+  }
+
+  // ユーザーが話し始めたらタイマーをキャンセル
+  function cancelGreetingTimer() {
+    if (greetingTimeoutRef.current) {
+      clearTimeout(greetingTimeoutRef.current)
+      greetingTimeoutRef.current = null
+    }
+    userHasSpokenRef.current = true
   }
 
   // autoscroll to bottom when transcripts update
@@ -130,6 +190,11 @@ export default function RealtimePage() {
         const name = payload?.name || payload?.type || payload?.event || payload?.topic || null
         const isUserDelta = typeof name === 'string' && /conversation\.item\.audio_transcription\.delta/i.test(name)
         const isUserCompleted = typeof name === 'string' && /conversation\.item\.audio_transcription\.completed/i.test(name)
+
+        // ユーザーが話し始めたら挨拶タイマーをキャンセル
+        if (isUserDelta || isUserCompleted) {
+          cancelGreetingTimer()
+        }
 
         // If event is response.done or response.output_item.done, extract transcript(s) from payload.content
         const isResponseDone = typeof name === 'string' && /response\.done|response\.output_item\.done|response\.content_part|response\.content_part\.done/i.test(name)
@@ -283,6 +348,11 @@ export default function RealtimePage() {
         const isUserDelta = typeof name === 'string' && /conversation\.item\.audio_transcription\.delta/i.test(name)
         const isUserCompleted = typeof name === 'string' && /conversation\.item\.audio_transcription\.completed/i.test(name)
 
+        // ユーザーが話し始めたら挨拶タイマーをキャンセル
+        if (isUserDelta || isUserCompleted) {
+          cancelGreetingTimer()
+        }
+
         // If event is response.done or response.output_item.done, first check for function_call items and handle them
         const isResponseDone = typeof name === 'string' && /response\.done|response\.output_item\.done|response\.content_part|response\.content_part\.done/i.test(name)
         // If this is an output_item.done that contains a function_call item, process it per Zenn/MS pattern
@@ -413,9 +483,18 @@ export default function RealtimePage() {
     await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp })
 
   setStatus('connected')
+
+    // 接続成功後、挨拶タイマーを開始
+    startGreetingTimer()
   }
 
   function stop() {
+    // 挨拶タイマーをクリア
+    if (greetingTimeoutRef.current) {
+      clearTimeout(greetingTimeoutRef.current)
+      greetingTimeoutRef.current = null
+    }
+
     pcRef.current?.close()
     pcRef.current = null
     localStreamRef.current?.getTracks().forEach(t => t.stop())
@@ -425,18 +504,18 @@ export default function RealtimePage() {
 
   return (
     <div style={{padding: 20}}>
-      <h2>Realtime audio (WebRTC) — POC</h2>
-      <p>Status: {status}</p>
+      <h2>AI カスタマーサポート - 音声対話システム</h2>
+      <p>ステータス: {status}</p>
       <div>
-        <button onClick={start} disabled={status === 'connected' || status === 'creating-pc'}>Start</button>
-        <button onClick={stop}>Stop</button>
+        <button onClick={start} disabled={status === 'connected' || status === 'creating-pc'}>開始</button>
+        <button onClick={stop}>停止</button>
       </div>
       <audio id="remote-audio" autoPlay controls style={{marginTop: 12}} />
       <div style={{marginTop: 12}}>
-        <small>Note: This is a minimal POC. Adjust server session API and SDP exchange per Azure docs.</small>
+        <small>クレジットカード情報変更など、お気軽にお問い合わせください。その他の問い合わせは有人オペレーターにおつなぎいたします。</small>
       </div>
       <div style={{marginTop:12}}>
-        <h4>Chat (Realtime)</h4>
+        <h4>会話履歴</h4>
   <div ref={chatContainerRef} style={{border:'1px solid #ddd', padding:8, height:320, overflow:'auto', background:'#ffffff', display:'flex', flexDirection:'column', gap:8}}>
           {transcripts.length === 0 ? (
             <div style={{color:'#666', textAlign:'center', padding:12}}>No speech yet</div>

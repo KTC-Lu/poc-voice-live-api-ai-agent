@@ -9,11 +9,14 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@azure/cosmos": "^4.5.1",
+    "canvas": "^3.2.0",
     "next": "latest",
+    "pdf-parse": "^2.3.11",
+    "pdfjs-dist": "^5.4.296",
     "react": "18.2.0",
-  "react-dom": "18.2.0",
-  "@azure/cosmos": "^4.5.1",
-  "ws": "^8.13.0"
+    "react-dom": "18.2.0",
+    "ws": "^8.13.0"
   },
   "devDependencies": {
     "@types/node": "24.4.0",

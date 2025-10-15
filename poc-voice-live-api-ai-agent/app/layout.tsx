@@ -1,5 +1,5 @@
 export const metadata = {
-  title: 'POC Voice Live API AI Agent'
+  title: 'AI カスタマーサポート - 音声対話システム'
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

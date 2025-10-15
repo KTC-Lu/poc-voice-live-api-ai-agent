@@ -1,4 +1,3 @@
-import { headers } from 'next/headers'
 import { NextResponse } from 'next/server'
 
 function ensureUrlHasProtocol(u?: string) {
@@ -36,74 +35,79 @@ async function createRealtimeSession() {
   // AZURE_OPENAI_SESSION_OPTIONS (JSON string) so features like input transcription
   // can be enabled without changing code. Example env value:
   // AZURE_OPENAI_SESSION_OPTIONS='{"transcription": {"enable_input": true}}'
-  const baseBody: any = { 
+  const baseBody: any = {
     model: deployment || 'gpt-realtime',
     input_audio_transcription: {
       model: deployment || 'gpt-realtime',
       language: "ja"
     },
-    instructions: `レンタカーの予約窓口のオペレーターです。対応中のお客様の名前は'しろくま'です。用意されているツールを利用し、お客様のレンタカー予約管理を行ってください。
-    
-    # 仕事の流れ
-    1. どの店舗で利用したいか、利用場所を明確にしましょう
-    2. 利用日時をヒアリングしましょう
-    3. 車両の種類を確認しましょう。
-    4. 利用できる車種があるかどうか、確認しましょう。
-    5. 予約登録しましょう。
+    instructions: `あなたはカスタマーサポートの自動応答システムです。お客様からの問い合わせに丁寧に対応してください。
+
+    # あなたの役割
+    - 情報提供と質問への回答のみを行います
+    - 一切の操作や手続きは行いません
+    - 必要に応じて有人オペレーターへの転送を案内します
+
+    # 利用可能なツール
+    お客様の質問に回答するために、以下のナレッジ取得ツールを使用できます：
+
+    - **get_credit_card_knowledge**: クレジットカード情報の変更方法に関するナレッジを取得。お客様ご自身がMyKINTOで変更する手順を案内するための情報です。
+
+    お客様の質問内容に応じて、適切なツールを呼び出してナレッジを取得し、その情報を基に回答してください。
+
+    **重要**: どのツールも該当しない質問の場合は、有人オペレーターへの転送を案内してください。
+
+    # 対応方法
+    1. **お客様の質問を理解する**
+       - お客様が何について質問しているか判断します
+       - 適切なナレッジ取得ツールがあれば、それを呼び出します
+       - ツールから得た情報を基に、丁寧に回答します
+
+    2. **お客様が操作方法を知りたい場合**
+       - お客様が「〜したい」「〜する方法は？」と質問した場合
+       - ナレッジツールから取得した情報を基に、お客様ご自身で操作する方法を丁寧に説明してください
+       - 例：「クレジットカード情報を変更したい」→ get_credit_card_knowledgeを呼び出し → MyKINTOでの変更手順を案内
+
+    3. **お客様が操作の代行を依頼する場合**
+       以下の場合は必ず有人オペレーターへの転送をご案内してください：
+       - お客様が「代わりにやってほしい」「自分でやりたくない」「やってください」など、操作の代行を依頼した場合
+       - 操作方法を案内した後、お客様が「自分ではできない」「難しい」などと言った場合
+       - お客様が直接「人工客服」「有人対応」「オペレーター」などを要求した場合
+
+       **重要：操作方法を案内してもお客様が「自分でやりたくない」「代わりにやってほしい」という意思を示された場合は、
+       説明を繰り返さず、直ちに有人オペレーターへ転送してください。**
+
+       転送時は以下のように簡潔に案内してください：
+       「かしこまりました。有人オペレーターにおつなぎいたします。少々お待ちください。」
+
+    4. **該当するツールがない場合**
+       - 利用可能なナレッジツールで対応できない質問の場合は、有人オペレーターへの転送を案内してください
+       - 例：「保険について知りたい」など、クレジットカード以外のトピックの場合
 
     # ルール
-    - レンタカーの予約の際は、必ず開始時刻と返却日時を明確にしましょう。
-    - ツール実行している間も、会話を途切れないように、「少々お待ちください。」や「お調べ中です」などと会話をしましょう。`,
-    // Azure Realtime expects tool declarations under `tools`.
-    // Use type: 'function' for embedded callable functions.
+    - 常に丁寧な言葉遣いを心がけてください
+    - お客様の質問に応じて、適切なナレッジツールを必ず呼び出してください
+    - ツールから得た情報のみを基に回答し、推測や不確実な情報は提供しないでください
+    - お客様が「〜したい」と質問した場合は、まず操作方法を案内してください（代行依頼ではない限り）
+    - お客様が操作の代行を明確に依頼した場合のみ、有人オペレーターへ転送してください
+    - 該当するツールがない質問の場合は、有人オペレーターへ転送してください
+    - 転送の案内は簡潔に、余計な説明を加えないでください
+    - 同じ説明を繰り返さないでください。お客様が納得していない場合は有人オペレーターへ転送してください`,
+    // ナレッジ取得ツールを登録
     tools: [
       {
         type: 'function',
-        name: 'list_locations',
-        description: 'Return list of rental locations (id, name, address, phone)',
-        parameters: { type: 'object', properties: {}, required: [] }
-      },
-      {
-        type: 'function',
-        name: 'get_availability',
-        description: 'Get available vehicles for a location and date range',
+        name: 'get_credit_card_knowledge',
+        description: 'クレジットカード情報の変更方法に関するナレッジを取得します。お客様ご自身がMyKINTOで変更する手順を案内するための情報を提供します。クレジットカード関連の質問があった場合に使用してください。',
         parameters: {
           type: 'object',
           properties: {
-            locationId: { type: 'string' },
-            startDate: { type: 'string', description: 'ISO8601 start datetime' },
-            endDate: { type: 'string', description: 'ISO8601 end datetime' },
-            vehicleType: { type: 'string', description: 'Optional vehicle type filter' }
+            query: {
+              type: 'string',
+              description: 'お客様の質問内容（将来的な検索機能のため）'
+            }
           },
-          required: ['locationId', 'startDate', 'endDate']
-        }
-      },
-      {
-        type: 'function',
-        name: 'create_reservation',
-        description: 'Create a reservation in the rent-a-car system',
-        parameters: {
-          type: 'object',
-          properties: {
-            locationId: { type: 'string' },
-            startDate: { type: 'string' },
-            endDate: { type: 'string' },
-            customerName: { type: 'string' },
-            customerContact: { type: 'object' },
-            vehicleType: { type: 'string' },
-            vehicleId: { type: 'string' }
-          },
-          required: ['locationId', 'startDate', 'endDate', 'customerName']
-        }
-      },
-      {
-        type: 'function',
-        name: 'get_reservation_status',
-        description: 'Get reservations by customer name',
-        parameters: {
-          type: 'object',
-          properties: { customerName: { type: 'string' } },
-          required: ['customerName']
+          required: ['query']
         }
       }
     ]
