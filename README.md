@@ -84,6 +84,62 @@ AIカスタマーサポートは以下の問い合わせに対応します：
 
 ## 🏗️ アーキテクチャ
 
+### 接待フロー
+
+以下は、AI カスタマーサポートの接待機制を示すフローチャートです：
+
+```mermaid
+flowchart TD
+    Start([ユーザーがページにアクセス]) --> ClickStart[開始ボタンをクリック]
+    ClickStart --> GetMic[マイクアクセス許可取得]
+    GetMic --> CreateSession[Azure Realtime セッション作成<br/>/api/realtime/session]
+    CreateSession --> WebRTC[WebRTC接続確立<br/>音声ストリーミング開始]
+    WebRTC --> StartTimer[5秒タイマー開始]
+
+    StartTimer --> Timer{5秒以内に<br/>ユーザー発話?}
+    Timer -->|はい| CancelTimer[タイマーキャンセル]
+    Timer -->|いいえ| ProactiveGreeting[AIから挨拶送信<br/>こんにちは]
+
+    CancelTimer --> UserSpeak[ユーザー音声入力]
+    ProactiveGreeting --> AIGreeting[AIが挨拶応答]
+    AIGreeting --> UserSpeak
+
+    UserSpeak --> Transcription[音声テキスト変換<br/>Azure AI処理]
+    Transcription --> AIAnalyze{AIが質問内容を分析}
+
+    AIAnalyze -->|クレジットカード関連| CallTool[ナレッジツール呼び出し<br/>get_credit_card_knowledge]
+    AIAnalyze -->|該当ツールなし| TransferHuman1[有人オペレーター転送案内]
+
+    CallTool --> LoadKnowledge[knowledge/credit_card_faq.txt<br/>から情報取得]
+    LoadKnowledge --> ReturnKnowledge[ナレッジをAIに返却]
+    ReturnKnowledge --> CheckIntent{ユーザーの意図は?}
+
+    CheckIntent -->|操作方法を知りたい| GuideUser[MyKINTOでの<br/>変更手順を案内]
+    CheckIntent -->|操作代行依頼| TransferHuman2[有人オペレーター転送案内]
+
+    GuideUser --> UserResponse{ユーザーの反応}
+    UserResponse -->|理解した| AISynthesize[AI音声合成・再生]
+    UserResponse -->|自分でできない| TransferHuman3[有人オペレーター転送案内]
+
+    TransferHuman1 --> AISynthesize
+    TransferHuman2 --> AISynthesize
+    TransferHuman3 --> AISynthesize
+
+    AISynthesize --> DisplayTranscript[会話履歴に表示<br/>アシスタント発話のみ]
+    DisplayTranscript --> Continue{会話続行?}
+
+    Continue -->|はい| UserSpeak
+    Continue -->|いいえ| End([セッション終了])
+
+    style Start fill:#e1f5e1
+    style End fill:#ffe1e1
+    style ProactiveGreeting fill:#fff4e1
+    style CallTool fill:#e1f0ff
+    style TransferHuman1 fill:#ffe1f0
+    style TransferHuman2 fill:#ffe1f0
+    style TransferHuman3 fill:#ffe1f0
+```
+
 ### ディレクトリ構成
 
 ```
