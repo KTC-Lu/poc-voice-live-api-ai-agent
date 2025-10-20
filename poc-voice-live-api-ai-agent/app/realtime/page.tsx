@@ -6,6 +6,33 @@ export default function RealtimePage() {
   const [status, setStatus] = useState('idle')
   // transcripts now include speaker: 'user' | 'assistant', and partial flag
   const [transcripts, setTranscripts] = useState<Array<{id:string, speaker:'user'|'assistant', text:string, partial?:boolean}>>([])
+  // Token usage tracking with text/audio breakdown
+  const [tokenUsage, setTokenUsage] = useState<Array<{
+    id: string
+    inputTokens: number
+    outputTokens: number
+    cachedTokens: number
+    // Detailed breakdown
+    inputTextTokens: number
+    inputAudioTokens: number
+    outputTextTokens: number
+    outputAudioTokens: number
+    cachedTextTokens: number
+    cachedAudioTokens: number
+    timestamp: number
+  }>>([])
+  const [totalTokens, setTotalTokens] = useState({ 
+    input: 0, 
+    output: 0, 
+    cached: 0,
+    // Detailed breakdown
+    inputText: 0,
+    inputAudio: 0,
+    outputText: 0,
+    outputAudio: 0,
+    cachedText: 0,
+    cachedAudio: 0
+  })
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
   const dcRef = useRef<any>(null)
@@ -124,6 +151,9 @@ export default function RealtimePage() {
           } else {
             payload = parsed
           }
+          // DEBUG: Log event type for all messages
+          const eventType = payload?.type || payload?.name || payload?.event || 'unknown'
+          console.log('🔍 Received event:', eventType, payload)
         } catch (_) {
           payload = { text: String(ev.data) }
         }
@@ -151,8 +181,66 @@ export default function RealtimePage() {
         const isUserDelta = typeof name === 'string' && /conversation\.item\.(input_)?audio_transcription\.delta/i.test(name)
         const isUserCompleted = typeof name === 'string' && /conversation\.item\.(input_)?audio_transcription\.completed/i.test(name)
 
-// If event is response.done or response.output_item.done, extract transcript(s) from payload.content
+// If event is response.done, extract token usage information
         const isResponseDone = typeof name === 'string' && /response\.done|response\.output_item\.done|response\.content_part|response\.content_part\.done/i.test(name)
+        
+        // DEBUG: Log all response.done events to check structure
+        if (typeof name === 'string' && name === 'response.done') {
+          console.log('🎯 response.done event received!', payload)
+          console.log('🎯 usage object:', payload?.response?.usage)
+        }
+        
+        // Extract token usage from response.done event (usage is in payload.response.usage)
+        if (typeof name === 'string' && name === 'response.done' && payload?.response?.usage) {
+          const usage = payload.response.usage
+          const inputTokens = usage?.input_tokens || 0
+          const outputTokens = usage?.output_tokens || 0
+          const cachedTokens = usage?.input_token_details?.cached_tokens || 0
+          
+          // Extract detailed breakdown
+          const inputTextTokens = usage?.input_token_details?.text_tokens || 0
+          const inputAudioTokens = usage?.input_token_details?.audio_tokens || 0
+          const outputTextTokens = usage?.output_token_details?.text_tokens || 0
+          const outputAudioTokens = usage?.output_token_details?.audio_tokens || 0
+          const cachedTextTokens = usage?.input_token_details?.cached_tokens_details?.text_tokens || 0
+          const cachedAudioTokens = usage?.input_token_details?.cached_tokens_details?.audio_tokens || 0
+          
+          console.log('📊 Token usage extracted:', { 
+            inputTokens, outputTokens, cachedTokens,
+            breakdown: {
+              input: { text: inputTextTokens, audio: inputAudioTokens },
+              output: { text: outputTextTokens, audio: outputAudioTokens },
+              cached: { text: cachedTextTokens, audio: cachedAudioTokens }
+            },
+            fullUsage: usage 
+          })
+          
+          setTokenUsage(prev => [...prev, {
+            id: 'usage-' + String(Date.now()),
+            inputTokens,
+            outputTokens,
+            cachedTokens,
+            inputTextTokens,
+            inputAudioTokens,
+            outputTextTokens,
+            outputAudioTokens,
+            cachedTextTokens,
+            cachedAudioTokens,
+            timestamp: Date.now()
+          }])
+          
+          setTotalTokens(prev => ({
+            input: prev.input + inputTokens,
+            output: prev.output + outputTokens,
+            cached: prev.cached + cachedTokens,
+            inputText: prev.inputText + inputTextTokens,
+            inputAudio: prev.inputAudio + inputAudioTokens,
+            outputText: prev.outputText + outputTextTokens,
+            outputAudio: prev.outputAudio + outputAudioTokens,
+            cachedText: prev.cachedText + cachedTextTokens,
+            cachedAudio: prev.cachedAudio + cachedAudioTokens
+          }))
+        }
         // If this is an output_item.done that contains a function_call item, process it per Zenn/MS pattern:
         // - find item.type === 'function_call'
         // - execute the local function (POST /api/functions/{name})
@@ -298,6 +386,9 @@ export default function RealtimePage() {
         try {
           const parsed = JSON.parse(ev.data)
           payload = Array.isArray(parsed) ? (parsed.find((p: any) => p && (p.content || p.transcript || p.name || p.type)) || parsed[0]) : parsed
+          // DEBUG: Log event type for all messages
+          const eventType = payload?.type || payload?.name || payload?.event || 'unknown'
+          console.log('🔍 Received event (ondatachannel):', eventType, payload)
         } catch (_) {
           payload = { text: String(ev.data) }
         }
@@ -314,8 +405,66 @@ export default function RealtimePage() {
         const isUserDelta = typeof name === 'string' && /conversation\.item\.(input_)?audio_transcription\.delta/i.test(name)
         const isUserCompleted = typeof name === 'string' && /conversation\.item\.(input_)?audio_transcription\.completed/i.test(name)
 
-// If event is response.done or response.output_item.done, first check for function_call items and handle them
+// If event is response.done, extract token usage information (ondatachannel handler)
         const isResponseDone = typeof name === 'string' && /response\.done|response\.output_item\.done|response\.content_part|response\.content_part\.done/i.test(name)
+        
+        // DEBUG: Log all response.done events to check structure
+        if (typeof name === 'string' && name === 'response.done') {
+          console.log('🎯 response.done event received (ondatachannel)!', payload)
+          console.log('🎯 usage object (ondatachannel):', payload?.response?.usage)
+        }
+        
+        // Extract token usage from response.done event in ondatachannel (usage is in payload.response.usage)
+        if (typeof name === 'string' && name === 'response.done' && payload?.response?.usage) {
+          const usage = payload.response.usage
+          const inputTokens = usage?.input_tokens || 0
+          const outputTokens = usage?.output_tokens || 0
+          const cachedTokens = usage?.input_token_details?.cached_tokens || 0
+          
+          // Extract detailed breakdown
+          const inputTextTokens = usage?.input_token_details?.text_tokens || 0
+          const inputAudioTokens = usage?.input_token_details?.audio_tokens || 0
+          const outputTextTokens = usage?.output_token_details?.text_tokens || 0
+          const outputAudioTokens = usage?.output_token_details?.audio_tokens || 0
+          const cachedTextTokens = usage?.input_token_details?.cached_tokens_details?.text_tokens || 0
+          const cachedAudioTokens = usage?.input_token_details?.cached_tokens_details?.audio_tokens || 0
+          
+          console.log('📊 Token usage extracted (ondatachannel):', { 
+            inputTokens, outputTokens, cachedTokens,
+            breakdown: {
+              input: { text: inputTextTokens, audio: inputAudioTokens },
+              output: { text: outputTextTokens, audio: outputAudioTokens },
+              cached: { text: cachedTextTokens, audio: cachedAudioTokens }
+            },
+            fullUsage: usage 
+          })
+          
+          setTokenUsage(prev => [...prev, {
+            id: 'usage-' + String(Date.now()),
+            inputTokens,
+            outputTokens,
+            cachedTokens,
+            inputTextTokens,
+            inputAudioTokens,
+            outputTextTokens,
+            outputAudioTokens,
+            cachedTextTokens,
+            cachedAudioTokens,
+            timestamp: Date.now()
+          }])
+          
+          setTotalTokens(prev => ({
+            input: prev.input + inputTokens,
+            output: prev.output + outputTokens,
+            cached: prev.cached + cachedTokens,
+            inputText: prev.inputText + inputTextTokens,
+            inputAudio: prev.inputAudio + inputAudioTokens,
+            outputText: prev.outputText + outputTextTokens,
+            outputAudio: prev.outputAudio + outputAudioTokens,
+            cachedText: prev.cachedText + cachedTextTokens,
+            cachedAudio: prev.cachedAudio + cachedAudioTokens
+          }))
+        }
         // If this is an output_item.done that contains a function_call item, process it per Zenn/MS pattern
         if (isResponseDone) {
           const items = Array.isArray(payload?.content) ? payload.content : (payload?.output ? payload.output : (payload?.item ? [payload.item] : []))
@@ -483,6 +632,139 @@ export default function RealtimePage() {
       <audio id="remote-audio" autoPlay controls style={{marginTop: 12}} />
       <div style={{marginTop: 12}}>
         <small>クレジットカード情報変更など、お気軽にお問い合わせください。その他の問い合わせは有人オペレーターにおつなぎいたします。</small>
+      </div>
+      
+      {/* Token Usage Display */}
+      <div style={{marginTop: 20, padding: 12, background: '#f8f9fa', borderRadius: 8, border: '1px solid #e0e0e0'}}>
+        <h4 style={{marginTop: 0, marginBottom: 12}}>📊 Token 使用統計</h4>
+        
+        {/* Summary Cards */}
+        <div style={{display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 12}}>
+          <div style={{padding: 8, background: '#fff', borderRadius: 4, textAlign: 'center'}}>
+            <div style={{fontSize: 12, color: '#666', marginBottom: 4}}>入力 Tokens</div>
+            <div style={{fontSize: 20, fontWeight: 'bold', color: '#0b86ff'}}>{totalTokens.input.toLocaleString()}</div>
+            <div style={{fontSize: 10, color: '#999', marginTop: 4}}>
+              テキスト: {totalTokens.inputText.toLocaleString()} / オーディオ: {totalTokens.inputAudio.toLocaleString()}
+            </div>
+          </div>
+          <div style={{padding: 8, background: '#fff', borderRadius: 4, textAlign: 'center'}}>
+            <div style={{fontSize: 12, color: '#666', marginBottom: 4}}>出力 Tokens</div>
+            <div style={{fontSize: 20, fontWeight: 'bold', color: '#10b981'}}>{totalTokens.output.toLocaleString()}</div>
+            <div style={{fontSize: 10, color: '#999', marginTop: 4}}>
+              テキスト: {totalTokens.outputText.toLocaleString()} / オーディオ: {totalTokens.outputAudio.toLocaleString()}
+            </div>
+          </div>
+          <div style={{padding: 8, background: '#fff', borderRadius: 4, textAlign: 'center'}}>
+            <div style={{fontSize: 12, color: '#666', marginBottom: 4}}>キャッシュ Tokens</div>
+            <div style={{fontSize: 20, fontWeight: 'bold', color: '#f59e0b'}}>{totalTokens.cached.toLocaleString()}</div>
+            <div style={{fontSize: 10, color: '#999', marginTop: 4}}>
+              {totalTokens.cached > 0 ? `テキスト: ${totalTokens.cachedText.toLocaleString()} / オーディオ: ${totalTokens.cachedAudio.toLocaleString()}` : '未使用'}
+            </div>
+          </div>
+        </div>
+        
+        {/* Cost Estimation */}
+        {totalTokens.input > 0 || totalTokens.output > 0 ? (
+          <div style={{padding: 10, background: '#fff', borderRadius: 4, marginBottom: 12}}>
+            <div style={{fontSize: 13, fontWeight: 'bold', marginBottom: 6, color: '#333'}}>💰 推定コスト</div>
+            <div style={{fontSize: 11, color: '#666', lineHeight: 1.6}}>
+              {(() => {
+                // Pricing per 1M tokens (in yen)
+                const pricing = {
+                  inputText: 598.03,
+                  inputAudio: 4784.17,
+                  cachedInput: 59.81,
+                  outputText: 2392.09,
+                  outputAudio: 9568.33
+                }
+                
+                // Calculate costs
+                const inputTextCost = (totalTokens.inputText / 1000000) * pricing.inputText
+                const inputAudioCost = (totalTokens.inputAudio / 1000000) * pricing.inputAudio
+                const cachedCost = (totalTokens.cached / 1000000) * pricing.cachedInput
+                const outputTextCost = (totalTokens.outputText / 1000000) * pricing.outputText
+                const outputAudioCost = (totalTokens.outputAudio / 1000000) * pricing.outputAudio
+                
+                const totalCost = inputTextCost + inputAudioCost + cachedCost + outputTextCost + outputAudioCost
+                
+                return (
+                  <>
+                    <div>入力テキスト: ¥{inputTextCost.toFixed(4)} + 入力オーディオ: ¥{inputAudioCost.toFixed(4)}</div>
+                    <div>出力テキスト: ¥{outputTextCost.toFixed(4)} + 出力オーディオ: ¥{outputAudioCost.toFixed(4)}</div>
+                    {totalTokens.cached > 0 && <div>キャッシュ: ¥{cachedCost.toFixed(4)}</div>}
+                    <div style={{marginTop: 6, paddingTop: 6, borderTop: '1px solid #e0e0e0', fontWeight: 'bold', color: '#0b86ff'}}>
+                      合計: ¥{totalCost.toFixed(4)}
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
+          </div>
+        ) : null}
+        
+        {/* Individual usage history */}
+        {tokenUsage.length > 0 && (
+          <details style={{marginTop: 8}}>
+            <summary style={{cursor: 'pointer', fontSize: 14, color: '#666'}}>
+              各応答の詳細 ({tokenUsage.length} 件)
+            </summary>
+            <div style={{marginTop: 8, maxHeight: 300, overflow: 'auto'}}>
+              {tokenUsage.slice().reverse().map((usage, idx) => {
+                // Calculate cost for this response
+                const pricing = {
+                  inputText: 598.03,
+                  inputAudio: 4784.17,
+                  cachedInput: 59.81,
+                  outputText: 2392.09,
+                  outputAudio: 9568.33
+                }
+                const cost = (
+                  (usage.inputTextTokens / 1000000) * pricing.inputText +
+                  (usage.inputAudioTokens / 1000000) * pricing.inputAudio +
+                  (usage.cachedTokens / 1000000) * pricing.cachedInput +
+                  (usage.outputTextTokens / 1000000) * pricing.outputText +
+                  (usage.outputAudioTokens / 1000000) * pricing.outputAudio
+                )
+                
+                return (
+                  <div key={usage.id} style={{padding: 8, marginBottom: 6, background: '#fff', borderRadius: 4, fontSize: 11, border: '1px solid #e8e8e8'}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 6}}>
+                      <span style={{fontWeight: 'bold', fontSize: 12}}>応答 #{tokenUsage.length - idx}</span>
+                      <span style={{color: '#666', fontSize: 10}}>{new Date(usage.timestamp).toLocaleTimeString('ja-JP')}</span>
+                    </div>
+                    <div style={{marginBottom: 4}}>
+                      <div style={{color: '#0b86ff', marginBottom: 2}}>
+                        📥 入力: <strong>{usage.inputTokens}</strong> 
+                        <span style={{color: '#999', marginLeft: 6}}>
+                          (テキスト: {usage.inputTextTokens} / オーディオ: {usage.inputAudioTokens})
+                        </span>
+                      </div>
+                      <div style={{color: '#10b981', marginBottom: 2}}>
+                        📤 出力: <strong>{usage.outputTokens}</strong>
+                        <span style={{color: '#999', marginLeft: 6}}>
+                          (テキスト: {usage.outputTextTokens} / オーディオ: {usage.outputAudioTokens})
+                        </span>
+                      </div>
+                      {usage.cachedTokens > 0 && (
+                        <div style={{color: '#f59e0b'}}>
+                          💾 キャッシュ: <strong>{usage.cachedTokens}</strong>
+                          {(usage.cachedTextTokens > 0 || usage.cachedAudioTokens > 0) && (
+                            <span style={{color: '#999', marginLeft: 6}}>
+                              (テキスト: {usage.cachedTextTokens} / オーディオ: {usage.cachedAudioTokens})
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{paddingTop: 4, borderTop: '1px solid #f0f0f0', color: '#666', fontSize: 10}}>
+                      💰 コスト: ¥{cost.toFixed(4)}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </details>
+        )}
       </div>
       <div style={{marginTop:12}}>
         <h4>会話履歴</h4>

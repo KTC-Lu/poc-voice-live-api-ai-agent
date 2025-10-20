@@ -20,6 +20,19 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                     ユーザーインターフェース                   │
 │              (app/realtime/page.tsx)                         │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  会話履歴表示                                         │  │
+│  │  ・ユーザー発話（Azure転写でリアルタイム表示）        │  │
+│  │  ・AI応答（テキスト+音声）                            │  │
+│  └──────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  Token使用統計パネル                                  │  │
+│  │  ・入力/出力/キャッシュ Tokens                        │  │
+│  │  ・Text/Audio 内訳                                    │  │
+│  │  ・リアルタイムコスト推定                             │  │
+│  │  ・応答履歴詳細                                       │  │
+│  └──────────────────────────────────────────────────────┘  │
 └──────────────────┬──────────────────────────────────────────┘
                    │ WebRTC
                    ↓
@@ -32,6 +45,8 @@
 ┌─────────────────────────────────────────────────────────────┐
 │              Azure OpenAI Realtime API                       │
 │                  (音声認識 + 対話生成)                        │
+│                ↓ response.done イベント                      │
+│            Token使用情報を含む                                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -44,6 +59,7 @@
 - **自然言語理解**: ユーザーの意図とニーズを理解
 - **音声合成**: AIの回答を音声に変換して再生
 - **双方向リアルタイム通信**: スムーズな対話をサポート、待機不要
+- **会話履歴のテキスト表示**: ユーザーの音声入力とAI応答をリアルタイムでUI上に表示
 
 ### ✅ 2. カスタマーサービス対話
 - **丁寧でプロフェッショナルな対話**: 敬語と丁寧な言葉遣いを使用
@@ -280,6 +296,303 @@ export async function POST(req: NextRequest) {
 
 ---
 
+## 会話履歴表示メカニズム
+
+### 概要
+
+システムは、ユーザーの音声入力とAIの応答をリアルタイムでUI上にテキスト表示します。これにより、音声対話の透明性を高め、ユーザーが自分の発言とAIの応答を視覚的に確認できます。
+
+### 実装方式
+
+#### ユーザー音声入力の表示
+
+ユーザーの音声は **Azure OpenAI Realtime API の `input_audio_transcription` 機能**を使用して自動的にテキスト化されます。
+
+**設定場所**: `app/api/realtime/session/route.ts`
+```typescript
+input_audio_transcription: {
+  model: deployment || 'gpt-realtime',
+  language: "ja"  // 日本語に設定
+}
+```
+
+**データフロー**:
+```
+1. ユーザーが話す
+   ↓ (WebRTC音声ストリーム)
+2. Azure OpenAI がリアルタイムで音声認識
+   ↓
+3. conversation.item.input_audio_transcription.completed イベント送信
+   ├─ type: 'conversation.item.input_audio_transcription.completed'
+   ├─ transcript: 'ユーザーの発話内容'
+   └─ item_id: '一意のID'
+   ↓
+4. フロントエンドがイベントを受信・表示 (page.tsx)
+   ↓
+5. UI右側に青色の吹き出しで表示（"You"）
+```
+
+**実装詳細**: `app/realtime/page.tsx`
+```typescript
+// ユーザー転写イベントの検出
+const isUserCompleted = typeof name === 'string' &&
+  /conversation\.item\.(input_)?audio_transcription\.completed/i.test(name)
+
+if (isUserCompleted) {
+  const userText = payload?.transcript || extractTextFromEvent(payload)
+  if (userText) {
+    const id = payload?.item_id || payload?.id || ('user-' + String(Date.now()))
+    upsertTranscript('user', String(id), userText, true)
+  }
+}
+```
+
+#### AI応答の表示
+
+AIの応答は **`response.audio_transcript.done` イベント**から抽出されます。
+
+**データフロー**:
+```
+1. AIが応答を生成
+   ↓
+2. response.audio_transcript.done イベント送信
+   ├─ type: 'response.audio_transcript.done'
+   ├─ content: [{ transcript: 'AIの応答内容' }]
+   └─ usage: { /* Token使用情報 */ }
+   ↓
+3. フロントエンドがイベントを受信・表示
+   ↓
+4. UI左側に灰色の吹き出しで表示（"Assistant"）
+```
+
+### UIレイアウト
+
+```
+┌─────────────────────────────────────────────────────┐
+│  会話履歴                                            │
+├─────────────────────────────────────────────────────┤
+│                                                     │
+│  ┌─────────────────────────┐                       │
+│  │ Assistant               │                       │
+│  │ こんにちは。どのような  │                       │
+│  │ ご用件でしょうか？      │                       │
+│  └─────────────────────────┘                       │
+│                                                     │
+│                       ┌─────────────────────────┐  │
+│                       │ You                     │  │
+│                       │ クレジットカードを      │  │
+│                       │ 変更したい              │  │
+│                       └─────────────────────────┘  │
+│                                                     │
+│  ┌─────────────────────────┐                       │
+│  │ Assistant               │                       │
+│  │ かしこまりました。      │                       │
+│  │ MyKINTOでの変更手順を   │                       │
+│  │ ご案内いたします...     │                       │
+│  └─────────────────────────┘                       │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+### 主な特徴
+
+1. **リアルタイム表示**: 音声認識と同時に文字が表示される
+2. **性能への影響最小**: Azure側で自動処理されるため、クライアント側の負荷なし
+3. **高精度**: Azure OpenAIの音声認識エンジンによる正確な転写
+4. **日本語対応**: `language: "ja"` 設定により日本語に最適化
+
+### 技術的な利点
+
+- **統合された転写**: AIが聞く内容と同じテキストを表示（完全な一貫性）
+- **追加コストなし**: `input_audio_transcription` は Realtime API の標準機能
+- **自動同期**: 音声とテキストが常に同期
+- **エラー処理**: 転写失敗時も音声対話は継続
+
+---
+
+## Token使用追跡メカニズム
+
+### 概要
+
+システムは `response.done` イベントから Token 使用情報を自動抽出し、リアルタイムで統計とコスト推定を表示します。
+
+### Token の種類
+
+Azure OpenAI Realtime API は以下の Token タイプを区別します：
+
+#### 1. 入力 Tokens (Input Tokens)
+AIに送信される内容で消費される Tokens：
+- **Text Tokens**: システム指令、ツール定義、対話履歴、ユーザーメッセージのテキスト
+- **Audio Tokens**: ユーザーの音声入力（音声データ）
+
+#### 2. 出力 Tokens (Output Tokens)
+AIが生成する内容で消費される Tokens：
+- **Text Tokens**: AI の回答テキスト、ツール呼び出し、推論内容
+- **Audio Tokens**: AI の音声合成（TTS）
+
+#### 3. キャッシュ Tokens (Cached Tokens)
+再利用される入力 Tokens（コスト削減）：
+- **Cached Text Tokens**: キャッシュされたシステム指令やツール定義
+- **Cached Audio Tokens**: キャッシュされた音声パターン（稀）
+
+### データフロー
+
+```
+1. ユーザーが話す
+   ↓
+2. Azure がリアルタイム音声認識 (Audio Tokens 消費)
+   ↓
+3. システム指令 + ツール定義 + 対話履歴を送信 (Text Tokens 消費)
+   ↓ (一部がキャッシュされる場合あり)
+4. GPT-4 が応答を生成 (Output Text Tokens 消費)
+   ↓
+5. 音声合成 (Output Audio Tokens 消費)
+   ↓
+6. response.done イベント発生
+   ├─ usage.input_tokens (合計入力)
+   ├─ usage.output_tokens (合計出力)
+   ├─ usage.input_token_details
+   │  ├─ text_tokens (入力テキスト)
+   │  ├─ audio_tokens (入力オーディオ)
+   │  ├─ cached_tokens (キャッシュ合計)
+   │  └─ cached_tokens_details
+   │     ├─ text_tokens (キャッシュテキスト)
+   │     └─ audio_tokens (キャッシュオーディオ)
+   └─ usage.output_token_details
+      ├─ text_tokens (出力テキスト)
+      └─ audio_tokens (出力オーディオ)
+   ↓
+7. フロントエンドが使用情報を抽出・集計
+   ↓
+8. UI に統計とコストを表示
+```
+
+### 実装詳細
+
+#### 1. Token 情報の抽出
+場所: `app/realtime/page.tsx`
+
+```typescript
+// response.done イベントを検出
+if (typeof name === 'string' && name === 'response.done' && payload?.response?.usage) {
+  const usage = payload.response.usage
+
+  // 総計
+  const inputTokens = usage?.input_tokens || 0
+  const outputTokens = usage?.output_tokens || 0
+  const cachedTokens = usage?.input_token_details?.cached_tokens || 0
+
+  // Text/Audio 内訳
+  const inputTextTokens = usage?.input_token_details?.text_tokens || 0
+  const inputAudioTokens = usage?.input_token_details?.audio_tokens || 0
+  const outputTextTokens = usage?.output_token_details?.text_tokens || 0
+  const outputAudioTokens = usage?.output_token_details?.audio_tokens || 0
+  const cachedTextTokens = usage?.input_token_details?.cached_tokens_details?.text_tokens || 0
+  const cachedAudioTokens = usage?.input_token_details?.cached_tokens_details?.audio_tokens || 0
+
+  // State に保存
+  setTokenUsage(prev => [...prev, { /* 詳細データ */ }])
+  setTotalTokens(prev => ({ /* 累計更新 */ }))
+}
+```
+
+#### 2. コスト計算
+Azure OpenAI 公式価格（100万 Tokens あたり、円）：
+
+```typescript
+const pricing = {
+  inputText: 598.03,      // テキスト入力
+  inputAudio: 4784.17,    // オーディオ入力
+  cachedInput: 59.81,     // キャッシュ入力 (90%削減!)
+  outputText: 2392.09,    // テキスト出力
+  outputAudio: 9568.33    // オーディオ出力
+}
+
+// コスト計算式
+const cost = (
+  (inputTextTokens / 1_000_000) * pricing.inputText +
+  (inputAudioTokens / 1_000_000) * pricing.inputAudio +
+  (cachedTokens / 1_000_000) * pricing.cachedInput +
+  (outputTextTokens / 1_000_000) * pricing.outputText +
+  (outputAudioTokens / 1_000_000) * pricing.outputAudio
+)
+```
+
+#### 3. UI 表示
+- **サマリーカード**: 入力/出力/キャッシュの総計と Text/Audio 内訳
+- **コストパネル**: 各タイプの推定コストと合計
+- **詳細履歴**: 各応答ごとの Token 使用とコスト（展開可能）
+
+### キャッシュメカニズム
+
+#### キャッシュされるもの
+1. **システム指令** (Instructions)
+   - 初回: 通常の Text Input Tokens として課金
+   - 2回目以降: Cached Tokens として課金（約90%削減）
+
+2. **ツール定義** (Tools)
+   - Function の name, description, parameters
+   - 対話中は変更されないため高いキャッシュ率
+
+3. **対話履歴** (一部)
+   - 長時間変更されない古い対話内容
+
+#### キャッシュの効果
+典型的なシナリオ：
+```
+初回対話:
+- Input Text: 2000 tokens (システム指令 + ツール定義)
+- コスト: 2000/1M × ¥598.03 = ¥0.0012
+
+2回目対話:
+- Input Text: 500 tokens (新しいユーザーメッセージのみ)
+- Cached: 1500 tokens (システム指令 + ツール定義)
+- コスト: 500/1M × ¥598.03 + 1500/1M × ¥59.81
+        = ¥0.0003 + ¥0.0001 = ¥0.0004
+- 削減率: 約67% 🎉
+```
+
+### 最適化のベストプラクティス
+
+#### 1. システム指令の安定化
+```typescript
+// ❌ 悪い例: 毎回変更
+instructions: `現在時刻: ${new Date()} ...`
+
+// ✅ 良い例: 安定した内容
+instructions: `あなたはカスタマーサポートです...`
+```
+
+#### 2. ツール定義の最小化
+```typescript
+// 必要なツールのみ登録
+tools: [
+  { name: 'get_credit_card_knowledge', ... }
+  // 使わないツールは削除
+]
+```
+
+#### 3. 対話履歴の管理
+- 長時間の対話では定期的にセッションをリセット
+- 不要な履歴を蓄積しない
+
+### 注意事項
+
+1. **推定値の扱い**
+   - UI に表示されるコストは推定値です
+   - 実際の課金は Azure Portal で確認してください
+
+2. **課金メトリクス**
+   - Portal の `processed_prompt_tokens` と `generated_completion_tokens` が実際の課金対象
+   - Realtime API の usage 情報は参考値として扱う
+
+3. **イメージ Tokens**
+   - 現在 Realtime API はイメージ入力をサポート
+   - イメージ Tokens は `text_tokens` に含まれます（独立フィールドなし）
+   - 1 イメージあたり約 85-1200 tokens（サイズとモードに依存）
+
+---
+
 ## 制限と注意事項
 
 ### 1. これはPOC（概念実証）です
@@ -288,8 +601,10 @@ export async function POST(req: NextRequest) {
 - データの永続化なし
 
 ### 2. コスト考慮
-- Realtime APIは分単位で課金
-- 各対話でコストが発生
+- Realtime API は Token ベースで課金
+- 各対話でコストが発生（音声は特に高コスト）
+- **Token 使用統計パネル**でリアルタイムに使用量とコストを確認可能
+- キャッシュメカニズムを活用することで約90%のコスト削減が可能
 
 ### 3. パフォーマンス制限
 - ネットワーク品質に依存
