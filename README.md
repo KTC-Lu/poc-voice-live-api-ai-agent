@@ -10,7 +10,6 @@
 - **ツールベースナレッジシステム**: AIが質問内容に応じて適切なナレッジツールを呼び出し
 - **クレジットカード情報Q&A**: クレジットカード情報の変更方法などをガイド（操作は行わない）
 - **リアルタイム処理**: WebRTC を使用した低遅延の音声通信
-- **プロアクティブな挨拶**: 5秒間ユーザーが話さない場合、AIから会話を開始
 - **人工オペレーター転送**: 操作代行依頼や対応できない問い合わせは有人オペレーターへの転送を案内
 - **拡張可能な設計**: 新しいナレッジ領域を簡単に追加できるモジュラー設計
 
@@ -94,15 +93,7 @@ flowchart TD
     ClickStart --> GetMic[マイクアクセス許可取得]
     GetMic --> CreateSession[Azure Realtime セッション作成<br/>/api/realtime/session]
     CreateSession --> WebRTC[WebRTC接続確立<br/>音声ストリーミング開始]
-    WebRTC --> StartTimer[5秒タイマー開始]
-
-    StartTimer --> Timer{5秒以内に<br/>ユーザー発話?}
-    Timer -->|はい| CancelTimer[タイマーキャンセル]
-    Timer -->|いいえ| ProactiveGreeting[AIから挨拶送信<br/>こんにちは]
-
-    CancelTimer --> UserSpeak[ユーザー音声入力]
-    ProactiveGreeting --> AIGreeting[AIが挨拶応答]
-    AIGreeting --> UserSpeak
+    WebRTC --> UserSpeak[ユーザー音声入力]
 
     UserSpeak --> Transcription[音声テキスト変換<br/>Azure AI処理]
     Transcription --> AIAnalyze{AIが質問内容を分析}
@@ -133,7 +124,6 @@ flowchart TD
 
     style Start fill:#e1f5e1
     style End fill:#ffe1e1
-    style ProactiveGreeting fill:#fff4e1
     style CallTool fill:#e1f0ff
     style TransferHuman1 fill:#ffe1f0
     style TransferHuman2 fill:#ffe1f0
