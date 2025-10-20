@@ -88,9 +88,29 @@ export default function RealtimePage() {
     try {
       dc = pc.createDataChannel('oai-events')
       dcRef.current = dc
-      dc.onopen = () => console.log('data channel open')
-      dc.onclose = () => console.log('data channel closed')
-      dc.onerror = (ev) => console.error('data channel error', ev)
+      dc.onopen = async () => {
+        console.log('✅ data channel open, readyState:', dc?.readyState)
+        // Send session update to enable input audio transcription
+        try {
+          await safeSend(dc, {
+            type: 'session.update',
+            session: {
+              input_audio_transcription: {
+                model: 'whisper-1'
+              }
+            }
+          })
+          console.log('📤 Sent session.update to enable input transcription')
+        } catch (e) {
+          console.warn('Failed to send session.update:', e)
+        }
+      }
+      dc.onclose = (ev) => {
+        console.warn('❌ data channel closed', { code: (ev as any).code, reason: (ev as any).reason, wasClean: (ev as any).wasClean })
+      }
+      dc.onerror = (ev) => {
+        console.error('🚨 data channel error', ev)
+      }
   dc.onmessage = async (ev) => {
         // DEBUG: raw datachannel message
         console.debug('datachannel raw message:', ev.data)
@@ -128,8 +148,8 @@ export default function RealtimePage() {
 
         // New: handle conversation.item.audio_transcription.delta and completed explicitly
         const name = payload?.name || payload?.type || payload?.event || payload?.topic || null
-        const isUserDelta = typeof name === 'string' && /conversation\.item\.audio_transcription\.delta/i.test(name)
-        const isUserCompleted = typeof name === 'string' && /conversation\.item\.audio_transcription\.completed/i.test(name)
+        const isUserDelta = typeof name === 'string' && /conversation\.item\.(input_)?audio_transcription\.delta/i.test(name)
+        const isUserCompleted = typeof name === 'string' && /conversation\.item\.(input_)?audio_transcription\.completed/i.test(name)
 
 // If event is response.done or response.output_item.done, extract transcript(s) from payload.content
         const isResponseDone = typeof name === 'string' && /response\.done|response\.output_item\.done|response\.content_part|response\.content_part\.done/i.test(name)
@@ -221,9 +241,17 @@ export default function RealtimePage() {
           if (payload?.error) console.debug('ondatachannel input_audio_transcription.error:', payload.error)
         }
 
-        // Ignore incoming user-side transcription events entirely (we only display assistant utterances)
+        // Handle user transcription events
         if (isUserDelta || isUserCompleted) {
-          // intentionally no-op: do not add user transcripts to UI
+          console.log('🎤 User transcription event:', { name, payload })
+          // Extract user transcript text
+          const userText = payload?.delta || payload?.transcript || extractTextFromEvent(payload)
+          console.log('🎤 Extracted user text:', userText)
+          if (userText) {
+            const isFinal = isUserCompleted || (!!payload?.is_final) || (!!payload?.final)
+            const id = payload?.item_id || payload?.id || ('user-' + String(Date.now()))
+            upsertTranscript('user', String(id), userText, isFinal)
+          }
           return
         }
 
@@ -231,7 +259,10 @@ export default function RealtimePage() {
         const eventType = payload?.type || payload?.event || payload?.name || null
         let speaker: 'user' | 'assistant' = 'assistant'
         if (eventType && /response|assistant|output_audio_transcript/i.test(String(eventType))) speaker = 'assistant'
+        
+        // Debug: log what's being classified as assistant
         if (text) {
+          console.log('📝 Transcript extracted:', { eventType, speaker, text: text.substring(0, 50) })
           // Upsert using explicit transcript id matching so we don't overwrite older final messages
           const isFinal = (!!payload?.is_final) || (!!payload?.final) || (!!payload?.committed)
           const id = payload?.transcript_id || payload?.id || (speaker + '-' + String(payload?.sequence || Date.now()))
@@ -242,7 +273,7 @@ export default function RealtimePage() {
       console.warn('createDataChannel failed', e)
     }
 
-    // Remove Web Speech API recognition fallback: we intentionally do not add local user transcripts
+    // Azure OpenAI's input_audio_transcription handles user transcription, so we don't need local Web Speech API
 
     // Handle remote track (playback)
     pc.ontrack = (ev) => {
@@ -280,8 +311,8 @@ export default function RealtimePage() {
         const text = extractTranscriptFromPayload(payload) || extractTextFromEvent(payload)
 
         const name = payload?.name || payload?.type || payload?.event || payload?.topic || null
-        const isUserDelta = typeof name === 'string' && /conversation\.item\.audio_transcription\.delta/i.test(name)
-        const isUserCompleted = typeof name === 'string' && /conversation\.item\.audio_transcription\.completed/i.test(name)
+        const isUserDelta = typeof name === 'string' && /conversation\.item\.(input_)?audio_transcription\.delta/i.test(name)
+        const isUserCompleted = typeof name === 'string' && /conversation\.item\.(input_)?audio_transcription\.completed/i.test(name)
 
 // If event is response.done or response.output_item.done, first check for function_call items and handle them
         const isResponseDone = typeof name === 'string' && /response\.done|response\.output_item\.done|response\.content_part|response\.content_part\.done/i.test(name)
@@ -338,8 +369,16 @@ export default function RealtimePage() {
           return
         }
 
-        // Ignore user transcription events
+        // Handle user transcription events
         if (isUserDelta || isUserCompleted) {
+          console.log('🎤 User transcription event (ondatachannel):', { name, payload })
+          const userText = payload?.delta || payload?.transcript || extractTextFromEvent(payload)
+          console.log('🎤 Extracted user text (ondatachannel):', userText)
+          if (userText) {
+            const isFinal = isUserCompleted || (!!payload?.is_final) || (!!payload?.final)
+            const id = payload?.item_id || payload?.id || ('user-' + String(Date.now()))
+            upsertTranscript('user', String(id), userText, isFinal)
+          }
           return
         }
 
@@ -420,6 +459,16 @@ export default function RealtimePage() {
     pcRef.current = null
     localStreamRef.current?.getTracks().forEach(t => t.stop())
     localStreamRef.current = null
+    // Stop speech recognition if running
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop()
+        recognitionRef.current = null
+        console.log('🛑 Stopped speech recognition')
+      } catch (e) {
+        console.warn('Error stopping speech recognition:', e)
+      }
+    }
     setStatus('stopped')
   }
 
@@ -441,8 +490,8 @@ export default function RealtimePage() {
           {transcripts.length === 0 ? (
             <div style={{color:'#666', textAlign:'center', padding:12}}>No speech yet</div>
           ) : null}
-          {/* Render only assistant transcripts */}
-          {transcripts.filter(t => t.speaker === 'assistant').map(t => (
+          {/* Render all transcripts (user and assistant) */}
+          {transcripts.map(t => (
             <div key={t.id} style={{display:'flex', justifyContent: t.speaker === 'user' ? 'flex-end' : 'flex-start'}}>
               <div style={{maxWidth:'75%', padding:'10px 12px', borderRadius:12, background: t.speaker === 'user' ? '#0b86ff' : '#f1f5f9', color: t.speaker === 'user' ? '#fff' : '#111', boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
                 <div style={{fontSize:12, marginBottom:6, opacity:0.8}}>{t.speaker === 'user' ? 'You' : 'Assistant'}</div>
