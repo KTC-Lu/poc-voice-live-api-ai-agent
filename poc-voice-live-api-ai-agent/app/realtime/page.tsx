@@ -639,7 +639,7 @@ export default function RealtimePage() {
         <h4 style={{marginTop: 0, marginBottom: 12}}>📊 Token 使用統計</h4>
         
         {/* Summary Cards */}
-        <div style={{display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 12}}>
+        <div style={{display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 12}}>
           <div style={{padding: 8, background: '#fff', borderRadius: 4, textAlign: 'center'}}>
             <div style={{fontSize: 12, color: '#666', marginBottom: 4}}>入力 Tokens</div>
             <div style={{fontSize: 20, fontWeight: 'bold', color: '#0b86ff'}}>{totalTokens.input.toLocaleString()}</div>
@@ -659,6 +659,31 @@ export default function RealtimePage() {
             <div style={{fontSize: 20, fontWeight: 'bold', color: '#f59e0b'}}>{totalTokens.cached.toLocaleString()}</div>
             <div style={{fontSize: 10, color: '#999', marginTop: 4}}>
               {totalTokens.cached > 0 ? `テキスト: ${totalTokens.cachedText.toLocaleString()} / オーディオ: ${totalTokens.cachedAudio.toLocaleString()}` : '未使用'}
+            </div>
+          </div>
+          <div style={{padding: 8, background: '#fff', borderRadius: 4, textAlign: 'center'}}>
+            <div style={{fontSize: 12, color: '#666', marginBottom: 4}}>💰 推定コスト</div>
+            <div style={{fontSize: 20, fontWeight: 'bold', color: '#dc2626'}}>
+              {(() => {
+                const pricing = {
+                  inputText: 598.03,
+                  inputAudio: 4784.17,
+                  cachedInput: 59.81,
+                  outputText: 2392.09,
+                  outputAudio: 9568.33
+                }
+                const totalCost = (
+                  (totalTokens.inputText / 1000000) * pricing.inputText +
+                  (totalTokens.inputAudio / 1000000) * pricing.inputAudio +
+                  (totalTokens.cached / 1000000) * pricing.cachedInput +
+                  (totalTokens.outputText / 1000000) * pricing.outputText +
+                  (totalTokens.outputAudio / 1000000) * pricing.outputAudio
+                )
+                return `¥${totalCost.toFixed(4)}`
+              })()}
+            </div>
+            <div style={{fontSize: 10, color: '#999', marginTop: 4}}>
+              日本円 (JPY)
             </div>
           </div>
         </div>
